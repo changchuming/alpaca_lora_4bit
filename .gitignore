@@ -1,3 +1,4 @@
 alpaca_lora/
 repository/
 __pycache__/
+llama30b-4bit.pt
