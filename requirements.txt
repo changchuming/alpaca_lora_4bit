@@ -1,6 +1,10 @@
-torch
-accelerate
-bitsandbytes
-git+https://github.com/huggingface/transformers.git
-git+https://github.com/qwopqwop200/GPTQ-for-LLaMa.git
+accelerate==0.18.0
+appdirs==1.4.4
+bitsandbytes==0.37.2
+datasets==2.10.1
+fire==0.5.0
 git+https://github.com/huggingface/peft.git
+git+https://github.com/huggingface/transformers.git
+gradio==3.23.0
+loralib==0.1.1
+sentencepiece==0.1.97
