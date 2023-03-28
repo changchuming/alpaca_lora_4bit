@@ -1,6 +1,9 @@
 alpaca_lora/
+waymo-alpaca/
 repository/
 __pycache__/
 llama30b-4bit.pt
 waymo_df.txt
 eng_df.txt
+llama-13b-4bit
+llama-13b-4bit.pt
