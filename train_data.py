@@ -160,7 +160,7 @@ class TrainSAD(ATrainData):
                 "attention_mask": result["attention_mask"][:-1],
             }
 
-    def prepare_data(self) -> None:
+    def prepare_data(self, use_eos_token=True, **kwargs) -> None:
         data = load_dataset("json", data_files=self.dataset.split(','))
 
         if self.val_set_size > 0:
