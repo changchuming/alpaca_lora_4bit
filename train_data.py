@@ -6,6 +6,8 @@ from datasets import load_dataset, Dataset
 from torch.utils.data import DataLoader
 from transformers import DefaultDataCollator
 import os
+import re
+from tokenizers import AddedToken
 
 
 # Abstract train data loader
@@ -126,6 +128,20 @@ class TrainTxt(ATrainData):
         self.train_data = data
 
 
+def match_tokens(prompt):
+  tokens = re.findall(r"[\w\-:/']+|[.,!?;]", prompt)
+
+  def match (token):
+    prefixes = ["go/", "b/", "cl/", "cs/", "--", "http://", "https://"]
+    if token.startswith(tuple(prefixes)):
+      return True
+
+  matched = []
+  for token in tokens:
+    if match(token):
+      matched.append(AddedToken(token, single_word=True, normalized=False))
+  return matched
+
 # Stanford Alpaca-like Data
 class TrainSAD(ATrainData):
     def __init__(self, dataset: str, val_set_size: int, tokenizer, cutoff_len) -> None:
@@ -134,6 +150,8 @@ class TrainSAD(ATrainData):
     def tokenize(self, prompt: str, use_eos_token=True, **kwargs) -> Dict[str, Any]:
         # there's probably a way to do this with the tokenizer settings
         # but again, gotta move fast
+        unique_tokens = match_tokens(prompt)
+        self.tokenizer.add_tokens(unique_tokens)
         if use_eos_token:
             result = self.tokenizer(
                 prompt + self.tokenizer.eos_token,
