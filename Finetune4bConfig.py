@@ -2,18 +2,20 @@ import os
 class Finetune4bConfig:
     """Config holder for LLaMA 4bit finetuning
     """
-    def __init__(self, dataset: str, ds_type: str, 
-                 lora_out_dir: str, lora_apply_dir : str,
+    def __init__(self, dataset: str, ds_type: str,
+                 lora_out_dir: str, lora_apply_dir: str, resume_checkpoint: str,
                  llama_q4_config_dir: str, llama_q4_model: str,
                  mbatch_size: int, batch_size: int,
-                 epochs: int, lr: float, 
+                 epochs: int, lr: float,
                  cutoff_len: int,
                  lora_r: int, lora_alpha: int, lora_dropout: float,
                  val_set_size: float,
                  gradient_checkpointing: bool,
                  gradient_checkpointing_ratio: float,
                  warmup_steps: int, save_steps: int, save_total_limit: int, logging_steps: int,
-                 checkpoint: bool, skip: bool
+                 checkpoint: bool, skip: bool, verbose: bool,
+                 txt_row_thd: int, use_eos_token: bool, groupsize: int, v1: bool,
+                 local_rank: int, flash_attention: bool, backend: str
                  ):
         """
         Args:
@@ -21,6 +23,7 @@ class Finetune4bConfig:
             ds_type (str): Dataset structure format
             lora_out_dir (str): Directory to place new LoRA
             lora_apply_dir (str): Path to directory from which LoRA has to be applied before training
+            resume_checkpoint (str): Path to Specified checkpoint you want to resume.
             llama_q4_config_dir (str): Path to the config.json, tokenizer_config.json, etc
             llama_q4_model (str): Path to the quantized model in huggingface format
             mbatch_size (int): Micro-batch size
@@ -40,11 +43,19 @@ class Finetune4bConfig:
             logging_steps (int): Logging steps
             checkpoint (bool): Produce checkpoint instead of LoRA
             skip (bool): Don't train model
+            verbose (bool): If output log of training
+            txt_row_thd (int): Custom row thd for txt file
+            use_eos_token (bool): Use Eos token instead of padding with 0
+            groupsize (int): Group size of V2 model
+            v1 (bool): v1 model flag
+            local_rank (int): local rank if using torch.distributed.launch
+            flash_attention (bool): Enables flash attention
         """
         self.dataset = dataset
         self.ds_type = ds_type
         self.lora_out_dir = lora_out_dir
         self.lora_apply_dir = lora_apply_dir
+        self.resume_checkpoint = resume_checkpoint
         self.llama_q4_config_dir = llama_q4_config_dir
         self.llama_q4_model = llama_q4_model
         self.mbatch_size = mbatch_size
@@ -65,12 +76,19 @@ class Finetune4bConfig:
         self.logging_steps = logging_steps
         self.checkpoint = checkpoint
         self.skip = skip
+        self.verbose = verbose
+        self.txt_row_thd = txt_row_thd
+        self.use_eos_token = use_eos_token
         self.world_size = int(os.environ.get("WORLD_SIZE", 1))
-        self.local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        self.local_rank = int(os.environ.get("LOCAL_RANK", local_rank))
         self.ddp = self.world_size != 1
         self.device_map = "auto" if not self.ddp else {"": self.local_rank}
         if self.ddp:
             self.gradient_accumulation_steps = self.gradient_accumulation_steps // self.world_size
+        self.groupsize = groupsize
+        self.v1 = v1
+        self.flash_attention = flash_attention
+        self.backend = backend
 
 
     def __str__(self) -> str:
@@ -82,5 +100,6 @@ class Finetune4bConfig:
         f"{self.warmup_steps=}\n{self.save_steps=}\n{self.save_total_limit=}\n" +\
         f"{self.logging_steps=}\n" +\
         f"{self.checkpoint=}\n{self.skip=}\n" +\
-        f"{self.world_size=}\n{self.ddp=}\n{self.device_map=}"
+        f"{self.world_size=}\n{self.ddp=}\n{self.device_map=}\n" +\
+        f"{self.groupsize=}\n{self.v1=}\n{self.backend=}\n"
         return s.replace("self.", "")

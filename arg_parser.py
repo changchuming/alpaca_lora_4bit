@@ -18,7 +18,7 @@ def parse_commandline():
     parser_training = parser.add_argument_group("training")
 
     # Config args group
-    parser_config.add_argument("--ds_type", choices=["txt", "alpaca"], default="alpaca", required=False,
+    parser_config.add_argument("--ds_type", choices=["txt", "alpaca", "gpt4all"], default="alpaca", required=False,
         help="Dataset structure format. Default: %(default)s"
     )
     parser_config.add_argument("--lora_out_dir", default="alpaca_lora", required=False,
@@ -26,6 +26,9 @@ def parse_commandline():
     )
     parser_config.add_argument("--lora_apply_dir", default=None, required=False,
         help="Path to directory from which LoRA has to be applied before training. Default: %(default)s"
+    )
+    parser_training.add_argument("--resume_checkpoint", default=None, required=False,
+        help="Resume training from specified checkpoint. Default: %(default)s"
     )
     parser_config.add_argument("--llama_q4_config_dir", default="./llama-13b-4bit/", required=False,
         help="Path to the config.json, tokenizer_config.json, etc. Default: %(default)s"
@@ -52,6 +55,24 @@ def parse_commandline():
     parser_training.add_argument("--logging_steps", default=10, type=int, help="Default: %(default)s")
     parser_training.add_argument("-c", "--checkpoint", action="store_true", help="Produce checkpoint instead of LoRA. Default: %(default)s")
     parser_training.add_argument("--skip", action="store_true", help="Don't train model. Can be useful to produce checkpoint from existing LoRA. Default: %(default)s")
+    parser_training.add_argument("--verbose", action="store_true", help="If output log of training. Default: %(default)s")
+
+    # Data args
+    parser_training.add_argument("--txt_row_thd", default=-1, type=int, help="Custom thd for txt rows.")
+    parser_training.add_argument("--use_eos_token", default=1, type=int, help="Use eos token instead if padding with 0. enable with 1, disable with 0.")
+    
+    # V2 model support
+    parser_training.add_argument("--groupsize", type=int, default=-1, help="Groupsize of v2 model")
+    parser_training.add_argument("--v1", action="store_true", help="Use V1 model")
+
+    # Multi GPU Support
+    parser_training.add_argument("--local_rank", type=int, default=0, help="local rank if using torch.distributed.launch")
+    
+    # Flash Attention
+    parser_training.add_argument("--flash_attention", action="store_true", help="enables flash attention, can improve performance and reduce VRAM use")
+
+    # Train Backend
+    parser_training.add_argument("--backend", type=str, default='cuda', help="Backend to use. Triton or Cuda.")
 
     return vars(parser.parse_args())
 
@@ -63,6 +84,7 @@ def get_config() -> Finetune4bConfig:
         ds_type=args["ds_type"], 
         lora_out_dir=args["lora_out_dir"], 
         lora_apply_dir=args["lora_apply_dir"],
+        resume_checkpoint=args["resume_checkpoint"],
         llama_q4_config_dir=args["llama_q4_config_dir"],
         llama_q4_model=args["llama_q4_model"],
         mbatch_size=args["mbatch_size"],
@@ -81,5 +103,13 @@ def get_config() -> Finetune4bConfig:
         save_total_limit=args["save_total_limit"],
         logging_steps=args["logging_steps"],
         checkpoint=args["checkpoint"],
-        skip=args["skip"]
+        skip=args["skip"],
+        verbose=args["verbose"],
+        txt_row_thd=args["txt_row_thd"],
+        use_eos_token=args["use_eos_token"]!=0,
+        groupsize=args["groupsize"],
+        v1=args["v1"],
+        local_rank=args["local_rank"],
+        flash_attention=args["flash_attention"],
+        backend=args["backend"],
     )

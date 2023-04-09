@@ -16,6 +16,19 @@
         }
     ]
 """
+# Early load config to replace attn if needed
+from arg_parser import get_config
+ft_config = get_config()
+
+if ft_config.flash_attention:
+    from monkeypatch.llama_flash_attn_monkey_patch import replace_llama_attn_with_flash_attn
+    replace_llama_attn_with_flash_attn()
+
+import autograd_4bit
+if ft_config.backend.lower() == 'triton':
+    autograd_4bit.switch_backend_to('triton')
+else:
+    autograd_4bit.switch_backend_to('cuda')
 
 import sys
 
@@ -29,10 +42,7 @@ from autograd_4bit import load_llama_model_4bit_low_ram
 from peft import LoraConfig, get_peft_model, get_peft_model_state_dict, PeftModel
 
 # ! Config
-from arg_parser import get_config
 import train_data
-
-ft_config = get_config()
 
 # * Show loaded parameters
 if ft_config.local_rank == 0:
@@ -42,7 +52,11 @@ if ft_config.gradient_checkpointing:
     print('Disable Dropout.')
 
 # Load Basic Model
-model, tokenizer = load_llama_model_4bit_low_ram(ft_config.llama_q4_config_dir, ft_config.llama_q4_model, device_map=ft_config.device_map)
+model, tokenizer = load_llama_model_4bit_low_ram(ft_config.llama_q4_config_dir,
+                                                  ft_config.llama_q4_model,
+                                                  device_map=ft_config.device_map,
+                                                  groupsize=ft_config.groupsize,
+                                                  is_v1_model=ft_config.v1)
 
 # Config Lora
 lora_config = LoraConfig(
@@ -56,14 +70,25 @@ lora_config = LoraConfig(
 if ft_config.lora_apply_dir is None:
     model = get_peft_model(model, lora_config)
 else:
-    model = PeftModel.from_pretrained(model, ft_config.lora_apply_dir, device_map={'': 0}, torch_dtype=torch.float32)  # ! Direct copy from inference.py
+    device_map = ft_config.device_map
+    if ft_config.ddp:
+        device_map = {'': 0}
+    else:
+        if torch.cuda.device_count() > 1:
+            device_map = "auto"
+        else:
+            device_map = {'': 0}
+    print('Device map for lora:', device_map)
+    model = PeftModel.from_pretrained(model, ft_config.lora_apply_dir, device_map=device_map, torch_dtype=torch.float32)
     print(ft_config.lora_apply_dir, 'loaded')
+
 
 # Scales to half
 print('Fitting 4bit scales and zeros to half')
 for n, m in model.named_modules():
     if '4bit' in str(type(m)):
-        m.zeros = m.zeros.half()
+        if m.groupsize == -1:
+            m.zeros = m.zeros.half()
         m.scales = m.scales.half()
 
 # Set tokenizer
@@ -78,9 +103,12 @@ if not ft_config.skip:
     elif ft_config.ds_type == "alpaca" and not ft_config.skip:
         #### Stanford Alpaca-like Data
         data = train_data.TrainSAD(ft_config.dataset, ft_config.val_set_size, tokenizer, ft_config.cutoff_len)
+    elif ft_config.ds_type == "gpt4all" and not ft_config.skip:
+        #### GPT4All Data
+        data = train_data.TrainGPT4All(ft_config.dataset, ft_config.val_set_size, tokenizer, ft_config.cutoff_len)
     else:
         raise NotImplementedError("ERROR: Unknown dataset format")
-    data.prepare_data()
+    data.prepare_data(thd=ft_config.txt_row_thd, use_eos_token=ft_config.use_eos_token)
     ####
 
     # Use gradient checkpointing
@@ -94,27 +122,30 @@ if not ft_config.skip:
         model.is_parallelizable = True
         model.model_parallel = True
 
+    training_arguments = transformers.TrainingArguments(
+        per_device_train_batch_size=ft_config.mbatch_size,
+        gradient_accumulation_steps=ft_config.gradient_accumulation_steps,
+        warmup_steps=ft_config.warmup_steps,
+        optim="adamw_torch",
+        num_train_epochs=ft_config.epochs,
+        learning_rate=ft_config.lr,
+        fp16=True,
+        logging_steps=ft_config.logging_steps,
+        evaluation_strategy="no",
+        save_strategy="steps",
+        eval_steps=None,
+        save_steps=ft_config.save_steps,
+        output_dir=ft_config.lora_out_dir,
+        save_total_limit=ft_config.save_total_limit,
+        load_best_model_at_end=False,
+        ddp_find_unused_parameters=False if ft_config.ddp else None,
+    )
+
     trainer = transformers.Trainer(
         model=model,
         train_dataset=data.train_data,
         eval_dataset=data.val_data,
-        args=transformers.TrainingArguments(
-            per_device_train_batch_size=ft_config.mbatch_size,
-            gradient_accumulation_steps=ft_config.gradient_accumulation_steps,
-            warmup_steps=ft_config.warmup_steps,
-            num_train_epochs=ft_config.epochs,
-            learning_rate=ft_config.lr,
-            fp16=True,
-            logging_steps=ft_config.logging_steps,
-            evaluation_strategy="no",
-            save_strategy="steps",
-            eval_steps=None,
-            save_steps=ft_config.save_steps,
-            output_dir=ft_config.lora_out_dir,
-            save_total_limit=ft_config.save_total_limit,
-            load_best_model_at_end=False,
-            ddp_find_unused_parameters=False if ft_config.ddp else None,
-        ),
+        args=training_arguments,
         data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False),
     )
     model.config.use_cache = False
@@ -125,8 +156,16 @@ if not ft_config.skip:
         lambda self, *_, **__: get_peft_model_state_dict(self, old_state_dict())
     ).__get__(model, type(model))
 
+    # Set Verbose
+    if ft_config.verbose:
+        transformers.logging.set_verbosity_info()
+
     # Run Trainer
-    trainer.train()
+    if ft_config.resume_checkpoint:
+        print('Resuming from {} ...'.format(ft_config.resume_checkpoint))
+        trainer.train(ft_config.resume_checkpoint)
+    else:
+        trainer.train()
 
     print('Train completed.')
 
