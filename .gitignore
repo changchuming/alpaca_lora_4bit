@@ -1,5 +1,6 @@
 alpaca_lora/
 waymo-alpaca/
+waymo-alpaca-notoken/
 repository/
 __pycache__/
 llama30b-4bit.pt
